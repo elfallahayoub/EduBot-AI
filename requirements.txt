@@ -1,0 +1,19 @@
+# Core ML / Deep Learning
+tensorflow
+torch
+transformers
+sentencepiece
+
+# Vector search
+faiss-cpu
+
+# Document parsing
+pypdf
+python-docx
+python-pptx
+openpyxl
+pandas
+
+# Utilities
+numpy
+scikit-learn
