@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# EduBot AI — fichiers lourds (modeles, datasets, tokenizers, index RAG)
+*.keras
+*.pkl
+*.h5
+*.weights.h5
+*.npy
+dataset_complet.json
+module2_distilbert/edubot_distilbert/
+module3_rag/faiss_index*
+
+# Fichiers de test temporaires (developpement local)
+_test_*.py
+
+# VS Code (configuration locale)
+.vscode/
