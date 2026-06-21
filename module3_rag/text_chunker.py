@@ -3,57 +3,52 @@ from pathlib import Path
 from typing import List
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import CHUNK_SIZE, CHUNK_OVERLAP
+from config import CHUNK_SIZE, LINES_PER_CHUNK, LINES_OVERLAP
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    if overlap >= chunk_size:
-        raise ValueError(f"overlap ({overlap}) must be less than chunk_size ({chunk_size}).")
-
-    words = text.split()
-    if not words:
+def chunk_text(
+    text: str,
+    chunk_size: int = CHUNK_SIZE,
+    lines_per_chunk: int = LINES_PER_CHUNK,
+    lines_overlap: int = LINES_OVERLAP,
+) -> List[str]:
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    if not lines:
         return []
 
-    chunks: List[str] = []
-    step  = chunk_size - overlap
-    start = 0
+    expanded: List[str] = []
+    for line in lines:
+        words = line.split()
+        if len(words) <= chunk_size:
+            expanded.append(line)
+        else:
+            for i in range(0, len(words), chunk_size):
+                expanded.append(" ".join(words[i : i + chunk_size]))
 
-    while start < len(words):
-        end = min(start + chunk_size, len(words))
-        chunks.append(" ".join(words[start:end]))
-        if end == len(words):
-            break
-        start += step
+    chunks: List[str] = []
+    step = max(1, lines_per_chunk - lines_overlap)
+    i = 0
+
+    while i < len(expanded):
+        chunks.append("\n".join(expanded[i : i + lines_per_chunk]))
+        i += step
 
     return chunks
 
 
 if __name__ == "__main__":
-    print("=== Test text_chunker.py ===\n")
-
     sample = (
-        "L'algorithmique est la science des algorithmes. "
-        "Un algorithme est une suite finie et ordonnée d'instructions. "
-        "Il permet de résoudre un problème de manière systématique. "
-        "En informatique, les algorithmes sont traduits en programmes. "
-        "La complexité algorithmique mesure l'efficacité d'un algorithme. "
-        "La notation Big-O décrit le comportement asymptotique dans le pire cas. "
-        "Le tri fusion a une complexité de O(n log n) garantie. "
-        "Le tri rapide a une complexité moyenne de O(n log n) mais O(n²) dans le pire cas."
+        "Calendrier des examens\n\n"
+        "Mathematiques : 9 juin 2026, 09h00, Salle A101\n"
+        "Algorithmique : 11 juin 2026, 14h00, Salle B203\n"
+        "Bases de Donnees : 12 juin 2026, 09h00, Labo Info\n\n"
+        "Reglement : carte etudiante obligatoire."
     )
 
-    chunks = chunk_text(sample, chunk_size=20, overlap=5)
-    print(f"Texte : {len(sample.split())} mots")
-    print(f"Chunks générés (chunk_size=20, overlap=5) : {len(chunks)}\n")
+    chunks = chunk_text(sample)
     for i, c in enumerate(chunks):
-        print(f"  Chunk {i+1} ({len(c.split())} mots) : {c[:80]}...")
+        print(f"[{i+1}] {c!r}")
 
-    assert chunk_text("", chunk_size=10, overlap=2) == []
-    assert len(chunk_text("un seul mot", chunk_size=10, overlap=2)) == 1
-    try:
-        chunk_text("test", chunk_size=10, overlap=10)
-        assert False
-    except ValueError:
-        pass
-
-    print("\nTest text_chunker.py : OK")
+    assert chunk_text("") == []
+    assert len(chunk_text("une seule ligne")) == 1
+    print("text_chunker.py: OK")

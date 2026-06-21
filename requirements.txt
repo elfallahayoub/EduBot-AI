@@ -14,6 +14,16 @@ python-pptx
 openpyxl
 pandas
 
+# Frontend
+streamlit
+
+# Generation
+google-genai
+python-dotenv
+
 # Utilities
 numpy
 scikit-learn
+
+# Protobuf pinned: TF 2.21+ requires >=6.31.1; do NOT install google-generativeai (deprecated, conflicts)
+protobuf>=6.31.1

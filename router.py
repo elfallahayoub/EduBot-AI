@@ -6,7 +6,7 @@ from typing import Optional
 
 import numpy as np
 
-# config must be imported before tensorflow so env vars are set before TF initialises
+# config must be imported before tensorflow to set env vars first
 sys.path.insert(0, str(Path(__file__).parent))
 from config import MODULE1_DIR
 
@@ -31,6 +31,12 @@ _MAX_LEN    = 20
 def _load_lstm() -> None:
     global _lstm_model, _tokenizer, _label_encoder
     if _lstm_model is None:
+        for p in (_MODEL_PATH, _TOK_PATH, _ENC_PATH):
+            if not p.exists():
+                raise FileNotFoundError(
+                    f"Fichier LSTM manquant : {p}\n"
+                    "Entraînez le modèle d'abord avec module1_lstm/train.py"
+                )
         _lstm_model = tf.keras.models.load_model(str(_MODEL_PATH))
         with open(_TOK_PATH, "rb") as f:
             _tokenizer = pickle.load(f)
@@ -82,55 +88,29 @@ if __name__ == "__main__":
     import tempfile
     from module3_rag.session_manager import create_session, add_file_to_session, cleanup_session
 
-    print("=" * 60)
-    print("  Test complet EduBot")
-    print("=" * 60)
-
     cleanup_expired_sessions()
 
-    print("\n[1] Salutation / Au revoir\n")
-    for question, desc in [
-        ("Bonjour !",          "salutation"),
-        ("Au revoir, merci !", "au revoir"),
-    ]:
-        print(f"  [{desc}]  Q : {question}")
+    for question in ["Bonjour !", "Au revoir, merci !"]:
         r = process_message(question)
-        print(f"  R : {r['answer'][:120]}")
-        print()
+        print(f"Q: {question}")
+        print(f"R: {r['answer'][:100]}\n")
 
-    print("\n[2] Question sans fichier uploadé\n")
-    q = "Quand est l'examen de mathématiques ?"
-    print(f"  Q : {q}")
-    r = process_message(q, session_id=None)
-    print(f"  Intention : {r['intent']}")
-    print(f"  R : {r['answer']}")
-    print()
-
-    print("\n[3] Question avec fichier uploadé\n")
     session_id = create_session()
-    upload_content = (
-        "Calendrier des examens - Faculté des Sciences\n\n"
-        "Mathématiques Avancées : Mardi 9 juin 2026, 09h00-11h00, Salle A101\n"
-        "Algorithmique          : Jeudi 11 juin 2026, 14h00-16h00, Salle B203\n"
-        "Bases de Données       : Vendredi 12 juin 2026, 09h00-12h00, Labo Informatique\n\n"
-        "Rappel : la carte étudiante est obligatoire. Arrivée 15 minutes avant le début."
+    content = (
+        "Calendrier des examens\n"
+        "Mathématiques : 9 juin 2026, 09h00, Salle A101\n"
+        "Algorithmique : 11 juin 2026, 14h00, Salle B203\n"
     )
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
-        f.write(upload_content)
+        f.write(content)
         tmp_path = f.name
 
-    print("  Traitement du fichier uploadé...")
     add_file_to_session(session_id, tmp_path)
 
-    for q in [
-        "Quand est l'examen de mathématiques ?",
-        "Quelle salle pour l'examen de bases de données ?",
-    ]:
-        print(f"\n  Q : {q}")
+    for q in ["Quand est l'examen de mathématiques ?", "Quelle salle pour algorithmique ?"]:
         r = process_message(q, session_id=session_id)
-        print(f"  Intention : {r['intent']}")
-        print(f"  R : {r['answer'][:200]}")
-        print(f"  Source : {r['source']}  |  Confiance : {r['confidence']}")
+        print(f"Q: {q}")
+        print(f"R: {r['answer'][:150]}")
+        print(f"   conf={r['confidence']}  src={r['source']}\n")
 
     cleanup_session(session_id)
-    print("\n\nTest router.py : OK")

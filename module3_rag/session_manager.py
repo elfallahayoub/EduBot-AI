@@ -44,7 +44,7 @@ def create_session() -> str:
     return session_id
 
 
-def add_file_to_session(session_id: str, file_path: str) -> dict:
+def add_file_to_session(session_id: str, file_path: str, display_name: Optional[str] = None) -> dict:
     sdir = _session_dir(session_id)
     if not sdir.exists():
         raise FileNotFoundError(f"Session '{session_id}' introuvable.")
@@ -54,32 +54,31 @@ def add_file_to_session(session_id: str, file_path: str) -> dict:
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Format '{ext}' non supporté. Formats acceptés : {SUPPORTED_EXTENSIONS}")
 
+    source_name = display_name or path.name
+
+    if source_name in list_session_files(session_id):
+        return {"session_id": session_id, "file": source_name, "chunks": 0, "status": "already_indexed"}
+
     if _active_file_count(session_id) >= MAX_FILES_PER_SESSION:
         raise ValueError(f"Limite de {MAX_FILES_PER_SESSION} fichiers par session atteinte.")
 
-    print(f"  Parsing '{path.name}'...")
-    text = parse_document(file_path)
-
+    text   = parse_document(file_path)
     path.unlink(missing_ok=True)
-
     chunks = chunk_text(text)
-    print(f"  {len(chunks)} chunks générés.")
 
     tokenizer, model = get_shared_model()
     embeddings = np.array([vectorize_text(chunk, tokenizer, model) for chunk in chunks])
 
-    idir = _index_dir(session_id)
+    idir  = _index_dir(session_id)
     store = VectorStore.load_from_disk(str(idir)) if idir.exists() else VectorStore()
-    store.add_chunks(chunks, embeddings, source=path.name)
+    store.add_chunks(chunks, embeddings, source=source_name)
     store.save_to_disk(str(idir))
 
     with open(_file_list_path(session_id), "a", encoding="utf-8") as f:
-        f.write(path.name + "\n")
+        f.write(source_name + "\n")
 
     _touch_activity(session_id)
-    print(f"  '{path.name}' indexé dans la session.")
-
-    return {"session_id": session_id, "file": path.name, "chunks": len(chunks)}
+    return {"session_id": session_id, "file": source_name, "chunks": len(chunks)}
 
 
 def get_session_store(session_id: str) -> Optional[VectorStore]:
@@ -100,7 +99,6 @@ def cleanup_session(session_id: str) -> None:
     sdir = _session_dir(session_id)
     if sdir.exists():
         shutil.rmtree(sdir)
-        print(f"Session '{session_id}' supprimée.")
 
 
 def cleanup_expired_sessions(max_age_hours: float = SESSION_MAX_AGE_HOURS) -> int:
@@ -123,53 +121,35 @@ def cleanup_expired_sessions(max_age_hours: float = SESSION_MAX_AGE_HOURS) -> in
             shutil.rmtree(sdir)
             removed += 1
 
-    print(f"{removed} session(s) expirée(s) supprimée(s).")
     return removed
 
 
 if __name__ == "__main__":
-    import tempfile, os
-
-    print("=== Test session_manager.py ===\n")
+    import tempfile
+    import os
 
     sid = create_session()
-    print(f"Session créée : {sid}")
-
     content = (
         "Introduction à Python\n\n"
         "Python est un langage de programmation interprété, orienté objet et de haut niveau. "
-        "Il est très populaire en science des données, en intelligence artificielle et en développement web. "
-        "Sa syntaxe claire et lisible en fait un excellent premier langage de programmation. "
-        "Les bibliothèques NumPy, pandas et scikit-learn sont les piliers du data science en Python. "
-        "TensorFlow et PyTorch sont les frameworks de deep learning les plus utilisés."
+        "Il est très populaire en science des données, en intelligence artificielle et en développement web."
     )
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(content)
         tmp_path = f.name
 
     result = add_file_to_session(sid, tmp_path)
-    print(f"\nRésultat : {result}")
-    print(f"Fichier original supprimé : {not os.path.exists(tmp_path)}")
-    print(f"Fichiers indexés : {list_session_files(sid)}")
-    print(f"Vecteurs dans l'index : {len(get_session_store(sid))}")
-
-    print("\nTest limite (4 fichiers max) :")
-    for i in range(MAX_FILES_PER_SESSION - 1):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
-            f.write(f"Fichier de test numéro {i+2}. " * 10)
-            add_file_to_session(sid, f.name)
+    assert result["chunks"] > 0
+    assert not os.path.exists(tmp_path)
+    assert list_session_files(sid) == [result["file"]]
 
     try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
-            f.write("Ce 5e fichier doit être rejeté.")
-            extra = f.name
-        add_file_to_session(sid, extra)
-        print("  ERREUR : le 5e fichier aurait dû être rejeté.")
-    except ValueError as e:
-        print(f"  [OK] 5e fichier rejeté : {e}")
-    finally:
-        if os.path.exists(extra):
-            os.unlink(extra)
+        for i in range(MAX_FILES_PER_SESSION):
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+                f.write(f"Fichier {i+2}. " * 10)
+                add_file_to_session(sid, f.name)
+        print("FAIL: limit not enforced")
+    except ValueError:
+        print("session_manager.py: OK")
 
     cleanup_session(sid)
-    print("\nTest session_manager.py : OK")

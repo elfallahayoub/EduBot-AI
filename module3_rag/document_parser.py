@@ -1,15 +1,24 @@
+import re
 import sys
+import tempfile
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import SUPPORTED_EXTENSIONS
 
 
-# Parsers are imported lazily to avoid loading heavy libs when not needed
 def _parse_pdf(file_path: str) -> str:
     from pypdf import PdfReader
     reader = PdfReader(file_path)
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    pages = []
+    for page in reader.pages:
+        # layout mode preserves table row order instead of reading column-by-column
+        text = page.extract_text(extraction_mode="layout") or ""
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        pages.append(text.strip())
+    return "\n\n".join(p for p in pages if p)
 
 
 def _parse_docx(file_path: str) -> str:
@@ -72,28 +81,23 @@ def parse_document(file_path: str) -> str:
 
 
 if __name__ == "__main__":
-    import tempfile, os
-
-    print("=== Test document_parser.py ===\n")
-
-    content = "Bonjour étudiant.\nCeci est un test du parseur de documents.\nBonne chance !"
+    content = "Bonjour étudiant.\nCeci est un test.\nBonne chance !"
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(content)
         tmp = f.name
 
-    result = parse_document(tmp)
+    assert parse_document(tmp).strip() == content.strip()
     os.unlink(tmp)
-    assert result.strip() == content.strip()
-    print(f"[OK] .txt  → {len(result)} caractères extraits")
 
     try:
         parse_document("fichier.xyz")
-    except ValueError as e:
-        print(f"[OK] Format inconnu → ValueError : {e}")
+    except ValueError:
+        pass
 
+    missing = str(Path(tempfile.gettempdir()) / "edubot_missing.txt")
     try:
-        parse_document("/tmp/fichier_inexistant.txt")
-    except FileNotFoundError as e:
-        print(f"[OK] Fichier manquant → FileNotFoundError : {e}")
+        parse_document(missing)
+    except FileNotFoundError:
+        pass
 
-    print("\nTest document_parser.py : OK")
+    print("document_parser.py: OK")

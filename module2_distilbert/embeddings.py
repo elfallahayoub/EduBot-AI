@@ -13,7 +13,6 @@ import transformers
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import DISTILBERT_MODEL_NAME
 
-# cmarkea/distilcamembert-base is a masked-LM checkpoint; MISSING/UNEXPECTED key warnings are expected
 transformers.logging.set_verbosity_error()
 
 
@@ -35,8 +34,6 @@ def _find_safetensors_in_hf_cache(model_name: str) -> Optional[str]:
 
 
 def _load_weights_streaming(safetensors_path: str, model) -> None:
-    # Reads one tensor at a time to avoid Windows OSError 1455 (paging file too small for mmap).
-    # Peak RAM = model_size (~270MB) + largest tensor (~100MB) instead of model + full file (~540MB).
     _DTYPE_TO_NUMPY = {
         "F32": np.float32, "F16": np.float16,
         "I64": np.int64,   "I32": np.int32, "I16": np.int16,
@@ -61,9 +58,9 @@ def _load_weights_streaming(safetensors_path: str, model) -> None:
             if name == "__metadata__":
                 continue
 
-            dtype_str    = info["dtype"]
-            shape        = info["shape"]
-            start, end   = info["data_offsets"]
+            dtype_str  = info["dtype"]
+            shape      = info["shape"]
+            start, end = info["data_offsets"]
 
             f.seek(data_start + start)
             raw = f.read(end - start)
@@ -90,12 +87,11 @@ def load_model():
     try:
         model = AutoModel.from_pretrained(DISTILBERT_MODEL_NAME, low_cpu_mem_usage=True)
     except OSError as exc:
+        # Windows OSError 1455: page file too small for mmap — load tensor-by-tensor instead
         if "1455" not in str(exc) and "pagination" not in str(exc).lower():
             raise
 
-        print("  [warning] mmap failed (paging file too small), switching to streaming loader...")
         gc.collect()
-
         weights_path = _find_safetensors_in_hf_cache(DISTILBERT_MODEL_NAME)
         if weights_path is None:
             raise RuntimeError(
@@ -113,8 +109,6 @@ def load_model():
 
 
 def vectorize_text(text: str, tokenizer, model) -> np.ndarray:
-    # Mean pooling over all token hidden states — more discriminative than CLS
-    # for models not fine-tuned on semantic similarity tasks.
     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True)
     with torch.no_grad():
         outputs = model(**inputs)
@@ -150,19 +144,14 @@ def get_shared_model():
 
 
 if __name__ == "__main__":
-    print("Chargement du modèle DistilCamemBERT...")
     tok, mdl = load_model()
-    print(f"Modèle chargé : {DISTILBERT_MODEL_NAME}\n")
 
-    phrase1 = "Quand est l'examen de mathématiques ?"
-    phrase2 = "L'examen de maths se déroule le 12 janvier 2026 à 9h00."
-    phrase3 = "Je voudrais m'inscrire à l'université."
+    p1 = "Quand est l'examen de mathématiques ?"
+    p2 = "L'examen de maths se déroule le 12 janvier 2026 à 9h00."
+    p3 = "Je voudrais m'inscrire à l'université."
 
-    v1 = vectorize_text(phrase1, tok, mdl)
-    v2 = vectorize_text(phrase2, tok, mdl)
-    v3 = vectorize_text(phrase3, tok, mdl)
+    v1 = vectorize_text(p1, tok, mdl)
+    v2 = vectorize_text(p2, tok, mdl)
+    v3 = vectorize_text(p3, tok, mdl)
 
-    print(f"Dimension du vecteur : {v1.shape}")
-    print(f"Similarité (question / réponse pertinente) : {cosine_similarity(v1, v2):.4f}")
-    print(f"Similarité (question / hors-sujet)         : {cosine_similarity(v1, v3):.4f}")
-    print("\nTest embeddings.py : OK")
+    print(f"dim={v1.shape}  sim(pertinent)={cosine_similarity(v1, v2):.4f}  sim(hors-sujet)={cosine_similarity(v1, v3):.4f}")

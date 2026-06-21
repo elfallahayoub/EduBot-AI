@@ -18,8 +18,9 @@ STORAGE_DIR       = MODULE3_DIR / "storage"
 TEMP_SESSIONS_DIR = STORAGE_DIR / "temp_sessions"
 
 DISTILBERT_MODEL_NAME = "cmarkea/distilcamembert-base"
-CHUNK_SIZE            = 250
-CHUNK_OVERLAP         = 50
+CHUNK_SIZE            = 60
+LINES_PER_CHUNK       = 3
+LINES_OVERLAP         = 1
 MAX_FILES_PER_SESSION = 4
 SESSION_MAX_AGE_HOURS = 24
 

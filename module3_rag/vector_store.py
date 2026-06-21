@@ -9,7 +9,7 @@ import numpy as np
 class VectorStore:
     def __init__(self, dimension: int = 768):
         self.dimension = dimension
-        # L2-normalized vectors + inner-product index = cosine similarity search
+        # IndexFlatIP on L2-normalized vectors = cosine similarity
         self.index   = faiss.IndexFlatIP(dimension)
         self.chunks  : List[str] = []
         self.sources : List[str] = []
@@ -67,8 +67,6 @@ class VectorStore:
 if __name__ == "__main__":
     import tempfile, shutil
 
-    print("=== Test vector_store.py ===\n")
-
     store = VectorStore(dimension=4)
     chunks = ["Le cours commence à 9h.", "L'examen est en janvier.", "Bonjour à tous !"]
     embeddings = np.array([
@@ -77,20 +75,17 @@ if __name__ == "__main__":
         [0.7, 0.7, 0.0, 0.0],
     ], dtype=np.float32)
 
-    store.add_chunks(chunks, embeddings, source="test_doc.txt")
-    print(f"Vecteurs indexés : {len(store)}")
+    store.add_chunks(chunks, embeddings, source="test.txt")
+    assert len(store) == 3
 
     query   = np.array([0.1, 0.9, 0.0, 0.0], dtype=np.float32)
     results = store.search(query, top_k=2)
-    print("Résultats (top-2) :")
-    for text, score, src in results:
-        print(f"  [{score:.4f}] ({src}) {text}")
+    assert len(results) == 2
 
     tmp_dir = tempfile.mkdtemp()
     store.save_to_disk(tmp_dir)
-    store2   = VectorStore.load_from_disk(tmp_dir)
-    results2 = store2.search(query, top_k=2)
+    store2 = VectorStore.load_from_disk(tmp_dir)
+    assert store.search(query, top_k=2) == store2.search(query, top_k=2)
     shutil.rmtree(tmp_dir)
 
-    assert results == results2
-    print("\nTest vector_store.py : OK")
+    print("vector_store.py: OK")

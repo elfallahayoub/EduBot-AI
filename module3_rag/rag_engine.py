@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -6,6 +7,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from module2_distilbert.embeddings import get_shared_model, vectorize_text
 from module3_rag.session_manager import get_session_store, list_session_files
+from module3_rag.answer_generator import generate_answer
+
+_SEMANTIC_W  = 0.4
+_KEYWORD_W   = 0.6
+_MIN_SCORE   = 0.50
+
+# Strips French elisions (l', d', j'...) so "l'examen" becomes "examen"
+_ELISION_RE = re.compile(r"\b\w'", re.UNICODE)
+
+
+def _normalize_query(query: str) -> str:
+    return _ELISION_RE.sub("", query.lower())
+
+
+def _keyword_score(query: str, chunk: str) -> float:
+    words = [w for w in _normalize_query(query).split()
+             if len(w) > 3 or (w.isdigit() and 1 <= len(w) <= 3)]
+    if not words:
+        return 0.0
+    chunk_lower = chunk.lower()
+    return sum(1.0 for w in words if w in chunk_lower) / len(words)
 
 
 def answer_question(question: str, session_id: Optional[str] = None, top_k: int = 3) -> dict:
@@ -42,19 +64,39 @@ def answer_question(question: str, session_id: Optional[str] = None, top_k: int 
             "confidence": 0.0,
         }
 
-    results = session_store.search(query_vector, top_k=top_k)
-    if not results:
+    candidates = session_store.search(query_vector, top_k=max(top_k * 3, len(session_store)))
+    if not candidates:
         return {
             "answer": "Je n'ai pas trouvé de réponse dans vos documents. Essayez de reformuler votre question.",
             "source": None,
             "confidence": 0.0,
         }
 
-    best_chunk, best_score, best_source = results[0]
+    ranked = sorted(
+        candidates,
+        key=lambda r: _SEMANTIC_W * r[1] + _KEYWORD_W * _keyword_score(question, r[0]),
+        reverse=True,
+    )
+
+    top_chunks = ranked[:top_k]
+    best_chunk, best_sem, best_source = top_chunks[0]
+    best_score = _SEMANTIC_W * best_sem + _KEYWORD_W * _keyword_score(question, best_chunk)
+
+    if best_score < _MIN_SCORE:
+        return {
+            "answer": (
+                "Je n'ai pas trouvé cette information dans vos documents. "
+                "Essayez de reformuler votre question ou vérifiez que le document "
+                "contenant cette information a bien été uploadé."
+            ),
+            "source": None,
+            "confidence": round(best_score, 4),
+        }
+
     return {
-        "answer":     best_chunk,
+        "answer":     generate_answer(question, top_chunks),
         "source":     best_source,
-        "confidence": round(float(best_score), 4),
+        "confidence": round(best_score, 4),
     }
 
 
@@ -62,37 +104,24 @@ if __name__ == "__main__":
     import tempfile
     from module3_rag.session_manager import create_session, add_file_to_session, cleanup_session
 
-    print("=" * 60)
-    print("  Test du moteur RAG")
-    print("=" * 60)
-
-    print("\n[1] Question sans fichier uploadé\n")
-    r = answer_question("Quand est l'examen de maths ?", session_id=None)
-    print(f"  R : {r['answer']}")
-
-    print("\n[2] Question avec fichier uploadé\n")
     session_id = create_session()
-
-    upload_content = (
-        "Calendrier des examens - Université Al Akhawayn\n\n"
-        "Mathématiques Avancées : Lundi 8 juin 2026, 09h00 - 11h00, Salle A101\n"
-        "Algorithmique         : Mercredi 10 juin 2026, 14h00 - 16h00, Salle B203\n"
-        "Bases de Données      : Jeudi 11 juin 2026, 09h00 - 12h00, Labo Info\n"
-        "Réseaux               : Vendredi 12 juin 2026, 09h00 - 11h00, Salle A205\n\n"
-        "Règles : carte étudiante obligatoire, arrivée 15 min avant."
+    content = (
+        "Calendrier des examens\n"
+        "Mathematiques : Mardi 9 juin 2026, 09h00, Salle A101\n"
+        "Algorithmique : Jeudi 11 juin 2026, 14h00, Salle B203\n"
+        "Bases de Donnees : Vendredi 12 juin 2026, 09h00, Labo Info\n"
+        "Reglement : carte etudiante obligatoire. Arrivee 15 min avant."
     )
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
-        f.write(upload_content)
-        tmp_path = f.name
+        f.write(content)
+        tmp = f.name
 
-    print("  Traitement du fichier uploadé...")
-    add_file_to_session(session_id, tmp_path)
+    add_file_to_session(session_id, tmp)
 
-    for q in ["Quand est l'examen de mathématiques ?", "Quelle salle pour l'examen de bases de données ?"]:
-        print(f"\n  Q : {q}")
+    for q in ["quand l'exam de math ?", "quelle salle pour bases de donnees ?", "quand est l'examen de chimie ?"]:
         r = answer_question(q, session_id=session_id)
-        print(f"  R : {r['answer'][:200]}")
-        print(f"  Source : {r['source']}  |  Confiance : {r['confidence']}")
+        print(f"Q: {q}")
+        print(f"R: {r['answer'][:120]}")
+        print(f"   conf={r['confidence']}  src={r['source']}\n")
 
     cleanup_session(session_id)
-    print("\n\nTest rag_engine.py : OK")
