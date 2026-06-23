@@ -7,13 +7,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from module2_distilbert.embeddings import get_shared_model, vectorize_text
 from module3_rag.session_manager import get_session_store, list_session_files
-from module3_rag.answer_generator import generate_answer
+from module3_rag.answer_generator import generate_answer, generate_answer_stream
 
 _SEMANTIC_W  = 0.4
 _KEYWORD_W   = 0.6
 _MIN_SCORE   = 0.50
 
-# Strips French elisions (l', d', j'...) so "l'examen" becomes "examen"
 _ELISION_RE = re.compile(r"\b\w'", re.UNICODE)
 
 
@@ -30,27 +29,31 @@ def _keyword_score(query: str, chunk: str) -> float:
     return sum(1.0 for w in words if w in chunk_lower) / len(words)
 
 
-def answer_question(question: str, session_id: Optional[str] = None, top_k: int = 3) -> dict:
+def retrieve(question: str, session_id: Optional[str], top_k: int = 3) -> dict:
+    """Retrieves relevant chunks without generating an answer.
+
+    Returns either:
+    - {"chunks": [...], "source": str, "confidence": float}  on success
+    - {"error": str, "source": None, "confidence": float}    on failure
+    """
     if not session_id:
         return {
-            "answer": (
+            "error": (
                 "Pour répondre à votre question, j'ai besoin de documents. "
                 "Veuillez uploader un fichier (PDF, Word, TXT...) "
                 "contenant les informations relatives à votre université."
             ),
-            "source": None,
-            "confidence": 0.0,
+            "source": None, "confidence": 0.0,
         }
 
     if not list_session_files(session_id):
         return {
-            "answer": (
+            "error": (
                 "Vous n'avez encore uploadé aucun document. "
                 "Veuillez joindre un fichier (PDF, DOCX, TXT, PPTX...) "
                 "et je répondrai à vos questions à partir de son contenu."
             ),
-            "source": None,
-            "confidence": 0.0,
+            "source": None, "confidence": 0.0,
         }
 
     tokenizer, model = get_shared_model()
@@ -59,17 +62,15 @@ def answer_question(question: str, session_id: Optional[str] = None, top_k: int 
     session_store = get_session_store(session_id)
     if session_store is None or len(session_store) == 0:
         return {
-            "answer": "Une erreur s'est produite avec vos fichiers. Veuillez les uploader à nouveau.",
-            "source": None,
-            "confidence": 0.0,
+            "error": "Une erreur s'est produite avec vos fichiers. Veuillez les uploader à nouveau.",
+            "source": None, "confidence": 0.0,
         }
 
     candidates = session_store.search(query_vector, top_k=max(top_k * 3, len(session_store)))
     if not candidates:
         return {
-            "answer": "Je n'ai pas trouvé de réponse dans vos documents. Essayez de reformuler votre question.",
-            "source": None,
-            "confidence": 0.0,
+            "error": "Je n'ai pas trouvé de réponse dans vos documents. Essayez de reformuler votre question.",
+            "source": None, "confidence": 0.0,
         }
 
     ranked = sorted(
@@ -84,19 +85,29 @@ def answer_question(question: str, session_id: Optional[str] = None, top_k: int 
 
     if best_score < _MIN_SCORE:
         return {
-            "answer": (
+            "error": (
                 "Je n'ai pas trouvé cette information dans vos documents. "
                 "Essayez de reformuler votre question ou vérifiez que le document "
                 "contenant cette information a bien été uploadé."
             ),
-            "source": None,
-            "confidence": round(best_score, 4),
+            "source": None, "confidence": round(best_score, 4),
         }
 
     return {
-        "answer":     generate_answer(question, top_chunks),
+        "chunks":     top_chunks,
         "source":     best_source,
         "confidence": round(best_score, 4),
+    }
+
+
+def answer_question(question: str, session_id: Optional[str] = None, top_k: int = 3) -> dict:
+    result = retrieve(question, session_id, top_k)
+    if "error" in result:
+        return {"answer": result["error"], "source": result["source"], "confidence": result["confidence"]}
+    return {
+        "answer":     generate_answer(question, result["chunks"]),
+        "source":     result["source"],
+        "confidence": result["confidence"],
     }
 
 

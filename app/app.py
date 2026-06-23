@@ -152,7 +152,7 @@ def chat():
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+            st.markdown(msg["content"])
             if msg.get("source") and msg.get("confidence") is not None:
                 st.markdown(
                     f'<span class="confidence-badge">Source : {msg["source"]} — '
@@ -173,9 +173,17 @@ def chat():
 
         with st.chat_message("assistant"):
             with st.spinner("Recherche dans vos documents..."):
-                result = process_message(prompt, session_id=st.session_state.session_id)
+                result = process_message(
+                    prompt,
+                    session_id=st.session_state.session_id,
+                    stream=True,
+                )
 
-            st.write(result["answer"])
+            if result.get("stream") is not None:
+                answer = st.write_stream(result["stream"])
+            else:
+                answer = result["answer"]
+                st.markdown(answer)
 
             if result.get("source") and result.get("confidence"):
                 st.markdown(
@@ -186,7 +194,7 @@ def chat():
 
         st.session_state.messages.append({
             "role": "assistant",
-            "content": result["answer"],
+            "content": answer,
             "source": result.get("source"),
             "confidence": result.get("confidence"),
         })

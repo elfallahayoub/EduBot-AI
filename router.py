@@ -15,7 +15,8 @@ tf.get_logger().setLevel("ERROR")
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from module3_rag.rag_engine import answer_question
+from module3_rag.rag_engine import answer_question, retrieve
+from module3_rag.answer_generator import generate_answer_stream
 from module3_rag.session_manager import cleanup_expired_sessions
 
 _lstm_model    = None
@@ -68,7 +69,7 @@ def classify_intent(question: str) -> str:
     return _label_encoder.inverse_transform([idx])[0]
 
 
-def process_message(question: str, session_id: Optional[str] = None) -> dict:
+def process_message(question: str, session_id: Optional[str] = None, stream: bool = False) -> dict:
     intent = classify_intent(question)
 
     if intent in SIMPLE_INTENTS:
@@ -77,10 +78,30 @@ def process_message(question: str, session_id: Optional[str] = None) -> dict:
             "answer":     SIMPLE_INTENTS[intent],
             "source":     None,
             "confidence": 1.0,
+            "stream":     None,
+        }
+
+    if stream:
+        retrieval = retrieve(question, session_id=session_id)
+        if "error" in retrieval:
+            return {
+                "intent":     intent,
+                "answer":     retrieval["error"],
+                "source":     retrieval["source"],
+                "confidence": retrieval["confidence"],
+                "stream":     None,
+            }
+        return {
+            "intent":     intent,
+            "answer":     None,
+            "source":     retrieval["source"],
+            "confidence": retrieval["confidence"],
+            "stream":     generate_answer_stream(question, retrieval["chunks"]),
         }
 
     result = answer_question(question, session_id=session_id)
     result["intent"] = intent
+    result["stream"] = None
     return result
 
 
